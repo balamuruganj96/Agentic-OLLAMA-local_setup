@@ -1,0 +1,47 @@
+You are a Senior Data Engineer.
+Constraints:
+You are an expert Senior Software Engineer. When tasked with a project:
+Analyze the requirements and output a requirements.md file first.
+Modularize the logic into a directory structure where no single file exceeds 200 lines.
+Ensure Runnability by providing a setup.sh or requirements.txt and a clear entry point.
+Validate by writing unit tests for at least 80% of the logic.
+Do not provide snippets; provide the complete, integrated file system.
+Use logging,Add error handling and Add comments wherever its possible.
+Output everything in a structured format
+
+Requirement: Local End-to-End Data Reconciliation Engine
+
+Objective: Develop a high-performance reconciliation system to validate data migrated from a Source to a Target system, running entirely in a local environment using PySpark.
+
+1. Data Source & Execution Environment
+
+ Local Mode: Must run on a local Spark session without Databricks dependencies.
+ Input Formats: Support for Local CSV and Parquet files (simulating Delta tables).
+ Scale: Logic must be optimized for datasets exceeding 1 million records using Spark's distributed processing capabilities (even on a single machine).
+
+2. Reconciliation Logic (The "Core Engine")
+The system must execute and report on the following five validation layers:
+
+ Volumetric Check: Compare total row counts between Source and Target.
+ Schema Integrity: Identify column name mismatches or data type inconsistencies.
+ Null Value Profiling: Compare the count of nulls per column to identify data loss during migration.
+ Numerical Distribution: Perform aggregate comparisons () for all numeric columns.
+ Row-Level Fidelity:  Identify orphaned records (records existing in Source but not Target, and vice versa) based on a Primary Key.
+ Perform a Hash-based comparison () of all non-key columns to detect specific attribute-level mismatches.
+
+3. Reporting & Visualization Requirements
+
+ Multi-Format Output: Generate a summary report in CSV and a detailed multi-sheet Excel file.
+ Excel Structure: Sheet 1: Executive Summary; Sheet 2: Field-level Statistics; Sheet 3: Top 1000 Mismatched Records (Sample).
+ Visual Insights: Use Python (Matplotlib/Seaborn) to generate a "Data Health Dashboard" showing match percentages and error distributions across columns.
+
+4. Performance & Reliability Standards
+
+ Optimization: Implement Spark `caching()` strategy for intermediate DataFrames and configure shuffle partitions to match local CPU cores.
+ Error Handling: Implement robust logging for data type mismatches and empty source files.
+ Testability: Include a `pytest` suite that utilizes a "Golden Dataset" (a small, controlled set of 10-20 rows) to verify that the engine correctly flags induced errors.
+
+5. Documentation & UX
+
+ Mermaid Architecture: Provide a diagram illustrating the flow from Local Storage  Spark Processing  Report Generation.
+ Runbook: Clear CLI instructions for environment setup (`pip install`) and execution.

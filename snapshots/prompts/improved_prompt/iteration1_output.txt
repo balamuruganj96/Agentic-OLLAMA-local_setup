@@ -1,0 +1,506 @@
+requirements.md
+Introduction
+This document outlines the requirements for the Local End-to-End Data Reconciliation Engine, which will be developed using PySpark to validate data migrated from a Source to a Target system running entirely in a local environment.
+
+1. Data Source & Execution Environment
+1.1 Local Mode
+The system must run on a local Spark session without Databricks dependencies.
+
+1.2 Input Formats
+Support for Local CSV and Parquet files (simulating Delta tables).
+
+1.3 Scale
+Logic must be optimized for datasets exceeding 1 million records using Spark's distributed processing capabilities (even on a single machine).
+
+2. Reconciliation Logic (Core Engine)
+The system will execute and report on the following five validation layers:
+
+Volumetric Check: Compare total row counts between Source and Target.
+Schema Integrity: Identify column name mismatches or data type inconsistencies.
+Null Value Profiling: Compare the count of nulls per column to identify data loss during migration.
+Numerical Distribution: Perform aggregate comparisons for all numeric columns.
+Row-Level Fidelity: Identify orphaned records (records existing in Source but not Target, and vice versa) based on a Primary Key.
+Hash-based Comparison: Perform a Hash-based comparison of all non-key columns to detect specific attribute-level mismatches.
+3. Reporting & Visualization Requirements
+3.1 Multi-Format Output
+Generate a summary report in CSV and a detailed multi-sheet Excel file.
+
+3.2 Excel Structure
+Sheet 1: Executive Summary; Sheet 2: Field-level Statistics; Sheet 3: Top 1000 Mismatched Records (Sample).
+
+3.3 Visual Insights
+Use Python (Matplotlib/Seaborn) to generate a "Data Health Dashboard" showing match percentages and error distributions across columns.
+
+4. Performance & Reliability Standards
+4.1 Optimization
+Implement Spark caching() strategy for intermediate DataFrames and configure shuffle partitions to match local CPU cores.
+
+4.2 Error Handling
+Implement robust logging for data type mismatches and empty source files.
+
+4.3 Testability
+Include a pytest suite that utilizes a "Golden Dataset" (a small, controlled set of 10-20 rows) to verify that the engine correctly flags induced errors.
+
+5. Documentation & UX
+5.1 Mermaid Architecture
+Provide a diagram illustrating the flow from Local Storage -> Spark Processing -> Report Generation.
+
+5.2 Runbook
+Clear CLI instructions for environment setup (pip install) and execution.
+
+setup.sh
+bash
+#!/bin/bash
+
+# Install required packages
+pip install pyspark matplotlib seaborn pandas
+#!/bin/bash
+
+# Install required packages
+pip install pyspark matplotlib seaborn pandas
+requirements.txt
+pyspark==3.4.1
+matplotlib==3.7.2
+seaborn==0.11.2
+pandas==1.5.2
+pyspark==3.4.1
+matplotlib==3.7.2
+seaborn==0.11.2
+pandas==1.5.2
+main.py
+python
+import os
+import logging
+from pyspark.sql import SparkSession, DataFrame
+from typing import List
+
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+class DataReconciliationEngine:
+    def __init__(self, source_path: str, target_path: str):
+        self.spark = SparkSession.builder.appName("DataReconciliation").getOrCreate()
+        self.source_path = source_path
+        self.target_path = target_path
+
+    def volumetric_check(self) -> int:
+        logging.info("Performing volumetric check...")
+        try:
+            source_df = self.spark.read.format('csv').option('header', 'true').load(self.source_path)
+            target_df = self.spark.read.format('parquet').load(self.target_path)
+            return source_df.count() == target_df.count()
+        except Exception as e:
+            logging.error(f"Error performing volumetric check: {e}")
+            return False
+
+    def schema_integrity_check(self) -> bool:
+        logging.info("Performing schema integrity check...")
+        try:
+            source_df = self.spark.read.format('csv').option('header', 'true').load(self.source_path)
+            target_df = self.spark.read.format('parquet').load(self.target_path)
+
+            if len(source_df.columns) != len(target_df.columns):
+                logging.error("Schema mismatch: number of columns do not match.")
+                return False
+
+            source_schema = source_df.schema
+            target_schema = target_df.schema
+
+            for col in source_schema:
+                if col.name not in target_schema.names or col.dataType != target_schema[col.name].dataType:
+                    logging.error(f"Data type mismatch for column: {col.name}")
+                    return False
+
+            return True
+        except Exception as e:
+            logging.error(f"Error performing schema integrity check: {e}")
+            return False
+
+    def null_value_profiling(self) -> List[str]:
+        logging.info("Performing null value profiling...")
+        try:
+            source_df = self.spark.read.format('csv').option('header', 'true').load(self.source_path)
+            target_df = self.spark.read.format('parquet').load(self.target_path)
+
+            null_counts = []
+            for col in source_df.columns:
+                null_count = source_df.filter(source_df[col].isNull()).count()
+                null_counts.append((col, null_count))
+                if null_count > 0:
+                    logging.warning(f"Column {col} has {null_count} null values.")
+
+            return null_counts
+        except Exception as e:
+            logging.error(f"Error performing null value profiling: {e}")
+            return []
+
+    def numerical_distribution(self) -> List[tuple]:
+        logging.info("Performing numerical distribution check...")
+        try:
+            source_df = self.spark.read.format('csv').option('header', 'true').load(self.source_path)
+            target_df = self.spark.read.format('parquet').load(self.target_path)
+
+            numeric_cols = [col.name for col in source_df.schema if col.dataType == "double" or col.dataType == "float"]
+            distribution_data = []
+
+            for col in numeric_cols:
+                agg_result = source_df.agg({col: 'mean'}).collect()[0]
+                avg_source = agg_result[col]
+
+                agg_result = target_df.agg({col: 'mean'}).collect()[0]
+                avg_target = agg_result[col]
+
+                if avg_source != avg_target:
+                    distribution_data.append((col, avg_source, avg_target))
+
+            return distribution_data
+        except Exception as e:
+            logging.error(f"Error performing numerical distribution check: {e}")
+            return []
+
+    def row_level_fidelity(self, primary_key_col: str) -> List[tuple]:
+        logging.info("Performing row-level fidelity check...")
+        try:
+            source_df = self.spark.read.format('csv').option('header', 'true').load(self.source_path)
+            target_df = self.spark.read.format('parquet').load(self.target_path)
+
+            source_df_caching = source_df.cache()
+            target_df_caching = target_df.cache()
+
+            source_only = source_df.filter(~source_df[primary_key_col].isin(target_df[primary_key_col]))
+            target_only = target_df.filter(~target_df[primary_key_col].isin(source_df[primary_key_col]))
+
+            return [(col, source_only.count(), target_only.count()) for col in source_only.columns]
+        except Exception as e:
+            logging.error(f"Error performing row-level fidelity check: {e}")
+            return []
+
+    def hash_based_comparison(self, non_key_cols: List[str]) -> List[tuple]:
+        logging.info("Performing hash-based comparison...")
+        try:
+            source_df = self.spark.read.format('csv').option('header', 'true').load(self.source_path)
+            target_df = self.spark.read.format('parquet').load(self.target_path)
+
+            source_df_caching = source_df.cache()
+            target_df_caching = target_df.cache()
+
+            hash_differences = []
+
+            for col in non_key_cols:
+                source_hashes = [hash(row[col]) for row in source_df.collect()]
+                target_hashes = [hash(row[col]) for row in target_df.collect()]
+
+                if source_hashes != target_hashes:
+                    mismatch_count = sum([source_hash != target_hash for source_hash, target_hash in zip(source_hashes, target_hashes)])
+                    hash_differences.append((col, mismatch_count))
+
+            return hash_differences
+        except Exception as e:
+            logging.error(f"Error performing hash-based comparison: {e}")
+            return []
+
+    def generate_report(self):
+        # Generate summary report and detailed Excel file
+
+def main():
+    source_path = 'path/to/source/data.csv'
+    target_path = 'path/to/target/data.parquet'
+
+    engine = DataReconciliationEngine(source_path, target_path)
+
+    if engine.volumetric_check():
+        logging.info("Volumetric check passed.")
+    else:
+        logging.error("Volumetric check failed.")
+
+    if engine.schema_integrity_check():
+        logging.info("Schema integrity check passed.")
+    else:
+        logging.error("Schema integrity check failed.")
+
+    null_counts = engine.null_value_profiling()
+    for col, null_count in null_counts:
+        logging.info(f"Column: {col}, Null Count: {null_count}")
+
+    distribution_data = engine.numerical_distribution()
+    for col, avg_source, avg_target in distribution_data:
+        logging.info(f"Column: {col}, Average Source: {avg_source}, Average Target: {avg_target}")
+
+    row_fidelity_results = engine.row_level_fidelity('primary_key_column')
+    for col, source_count, target_count in row_fidelity_results:
+        logging.info(f"Column: {col}, Source Only Count: {source_count}, Target Only Count: {target_count}")
+
+    hash_comparison_results = engine.hash_based_comparison(['non_key_col1', 'non_key_col2'])
+    for col, mismatch_count in hash_comparison_results:
+        logging.info(f"Column: {col}, Mismatch Count: {mismatch_count}")
+
+if __name__ == "__main__":
+    main()
+import os
+import logging
+from pyspark.sql import SparkSession, DataFrame
+from typing import List
+
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+class DataReconciliationEngine:
+    def __init__(self, source_path: str, target_path: str):
+        self.spark = SparkSession.builder.appName("DataReconciliation").getOrCreate()
+        self.source_path = source_path
+        self.target_path = target_path
+
+    def volumetric_check(self) -> int:
+        logging.info("Performing volumetric check...")
+        try:
+            source_df = self.spark.read.format('csv').option('header', 'true').load(self.source_path)
+            target_df = self.spark.read.format('parquet').load(self.target_path)
+            return source_df.count() == target_df.count()
+        except Exception as e:
+            logging.error(f"Error performing volumetric check: {e}")
+            return False
+
+    def schema_integrity_check(self) -> bool:
+        logging.info("Performing schema integrity check...")
+        try:
+            source_df = self.spark.read.format('csv').option('header', 'true').load(self.source_path)
+            target_df = self.spark.read.format('parquet').load(self.target_path)
+
+            if len(source_df.columns) != len(target_df.columns):
+                logging.error("Schema mismatch: number of columns do not match.")
+                return False
+
+            source_schema = source_df.schema
+            target_schema = target_df.schema
+
+            for col in source_schema:
+                if col.name not in target_schema.names or col.dataType != target_schema[col.name].dataType:
+                    logging.error(f"Data type mismatch for column: {col.name}")
+                    return False
+
+            return True
+        except Exception as e:
+            logging.error(f"Error performing schema integrity check: {e}")
+            return False
+
+    def null_value_profiling(self) -> List[str]:
+        logging.info("Performing null value profiling...")
+        try:
+            source_df = self.spark.read.format('csv').option('header', 'true').load(self.source_path)
+            target_df = self.spark.read.format('parquet').load(self.target_path)
+
+            null_counts = []
+            for col in source_df.columns:
+                null_count = source_df.filter(source_df[col].isNull()).count()
+                null_counts.append((col, null_count))
+                if null_count > 0:
+                    logging.warning(f"Column {col} has {null_count} null values.")
+
+            return null_counts
+        except Exception as e:
+            logging.error(f"Error performing null value profiling: {e}")
+            return []
+
+    def numerical_distribution(self) -> List[tuple]:
+        logging.info("Performing numerical distribution check...")
+        try:
+            source_df = self.spark.read.format('csv').option('header', 'true').load(self.source_path)
+            target_df = self.spark.read.format('parquet').load(self.target_path)
+
+            numeric_cols = [col.name for col in source_df.schema if col.dataType == "double" or col.dataType == "float"]
+            distribution_data = []
+
+            for col in numeric_cols:
+                agg_result = source_df.agg({col: 'mean'}).collect()[0]
+                avg_source = agg_result[col]
+
+                agg_result = target_df.agg({col: 'mean'}).collect()[0]
+                avg_target = agg_result[col]
+
+                if avg_source != avg_target:
+                    distribution_data.append((col, avg_source, avg_target))
+
+            return distribution_data
+        except Exception as e:
+            logging.error(f"Error performing numerical distribution check: {e}")
+            return []
+
+    def row_level_fidelity(self, primary_key_col: str) -> List[tuple]:
+        logging.info("Performing row-level fidelity check...")
+        try:
+            source_df = self.spark.read.format('csv').option('header', 'true').load(self.source_path)
+            target_df = self.spark.read.format('parquet').load(self.target_path)
+
+            source_df_caching = source_df.cache()
+            target_df_caching = target_df.cache()
+
+            source_only = source_df.filter(~source_df[primary_key_col].isin(target_df[primary_key_col]))
+            target_only = target_df.filter(~target_df[primary_key_col].isin(source_df[primary_key_col]))
+
+            return [(col, source_only.count(), target_only.count()) for col in source_only.columns]
+        except Exception as e:
+            logging.error(f"Error performing row-level fidelity check: {e}")
+            return []
+
+    def hash_based_comparison(self, non_key_cols: List[str]) -> List[tuple]:
+        logging.info("Performing hash-based comparison...")
+        try:
+            source_df = self.spark.read.format('csv').option('header', 'true').load(self.source_path)
+            target_df = self.spark.read.format('parquet').load(self.target_path)
+
+            source_df_caching = source_df.cache()
+            target_df_caching = target_df.cache()
+
+            hash_differences = []
+
+            for col in non_key_cols:
+                source_hashes = [hash(row[col]) for row in source_df.collect()]
+                target_hashes = [hash(row[col]) for row in target_df.collect()]
+
+                if source_hashes != target_hashes:
+                    mismatch_count = sum([source_hash != target_hash for source_hash, target_hash in zip(source_hashes, target_hashes)])
+                    hash_differences.append((col, mismatch_count))
+
+            return hash_differences
+        except Exception as e:
+            logging.error(f"Error performing hash-based comparison: {e}")
+            return []
+
+    def generate_report(self):
+        # Generate summary report and detailed Excel file
+
+def main():
+    source_path = 'path/to/source/data.csv'
+    target_path = 'path/to/target/data.parquet'
+
+    engine = DataReconciliationEngine(source_path, target_path)
+
+    if engine.volumetric_check():
+        logging.info("Volumetric check passed.")
+    else:
+        logging.error("Volumetric check failed.")
+
+    if engine.schema_integrity_check():
+        logging.info("Schema integrity check passed.")
+    else:
+        logging.error("Schema integrity check failed.")
+
+    null_counts = engine.null_value_profiling()
+    for col, null_count in null_counts:
+        logging.info(f"Column: {col}, Null Count: {null_count}")
+
+    distribution_data = engine.numerical_distribution()
+    for col, avg_source, avg_target in distribution_data:
+        logging.info(f"Column: {col}, Average Source: {avg_source}, Average Target: {avg_target}")
+
+    row_fidelity_results = engine.row_level_fidelity('primary_key_column')
+    for col, source_count, target_count in row_fidelity_results:
+        logging.info(f"Column: {col}, Source Only Count: {source_count}, Target Only Count: {target_count}")
+
+    hash_comparison_results = engine.hash_based_comparison(['non_key_col1', 'non_key_col2'])
+    for col, mismatch_count in hash_comparison_results:
+        logging.info(f"Column: {col}, Mismatch Count: {mismatch_count}")
+
+if __name__ == "__main__":
+    main()
+tests/test_data_reconciliation_engine.py
+python
+import pytest
+from data_reconciliation_engine import DataReconciliationEngine
+
+@pytest.fixture
+def engine():
+    return DataReconciliationEngine('path/to/source/data.csv', 'path/to/target/data.parquet')
+
+@pytest.mark.parametrize("col, expected_count", [
+    ('column1', 5),
+    ('column2', 0)
+])
+def test_null_value_profiling(engine, col, expected_count):
+    null_counts = engine.null_value_profiling()
+    assert any(col == c for c, count in null_counts) and count == expected_count
+
+@pytest.mark.parametrize("col, expected_avg_source, expected_avg_target", [
+    ('column3', 10.5, 9.8),
+    ('column4', None, None)
+])
+def test_numerical_distribution(engine, col, expected_avg_source, expected_avg_target):
+    distribution_data = engine.numerical_distribution()
+    assert any(col == c for c, avg_source, avg_target in distribution_data) and (avg_source == expected_avg_source or expected_avg_source is None) and (avg_target == expected_avg_target or expected_avg_target is None)
+
+@pytest.mark.parametrize("col, source_count, target_count", [
+    ('column5', 20, 15),
+    ('column6', 0, 3)
+])
+def test_row_level_fidelity(engine, col, source_count, target_count):
+    row_fidelity_results = engine.row_level_fidelity('primary_key_column')
+    assert any(col == c for c, s, t in row_fidelity_results) and (s == source_count or source_count is None) and (t == target_count or target_count is None)
+
+@pytest.mark.parametrize("col, mismatch_count", [
+    ('column7', 3),
+    ('column8', 0)
+])
+def test_hash_based_comparison(engine, col, mismatch_count):
+    hash_comparison_results = engine.hash_based_comparison(['non_key_col1', 'non_key_col2'])
+    assert any(col == c for c, count in hash_comparison_results) and count == mismatch_count
+import pytest
+from data_reconciliation_engine import DataReconciliationEngine
+
+@pytest.fixture
+def engine():
+    return DataReconciliationEngine('path/to/source/data.csv', 'path/to/target/data.parquet')
+
+@pytest.mark.parametrize("col, expected_count", [
+    ('column1', 5),
+    ('column2', 0)
+])
+def test_null_value_profiling(engine, col, expected_count):
+    null_counts = engine.null_value_profiling()
+    assert any(col == c for c, count in null_counts) and count == expected_count
+
+@pytest.mark.parametrize("col, expected_avg_source, expected_avg_target", [
+    ('column3', 10.5, 9.8),
+    ('column4', None, None)
+])
+def test_numerical_distribution(engine, col, expected_avg_source, expected_avg_target):
+    distribution_data = engine.numerical_distribution()
+    assert any(col == c for c, avg_source, avg_target in distribution_data) and (avg_source == expected_avg_source or expected_avg_source is None) and (avg_target == expected_avg_target or expected_avg_target is None)
+
+@pytest.mark.parametrize("col, source_count, target_count", [
+    ('column5', 20, 15),
+    ('column6', 0, 3)
+])
+def test_row_level_fidelity(engine, col, source_count, target_count):
+    row_fidelity_results = engine.row_level_fidelity('primary_key_column')
+    assert any(col == c for c, s, t in row_fidelity_results) and (s == source_count or source_count is None) and (t == target_count or target_count is None)
+
+@pytest.mark.parametrize("col, mismatch_count", [
+    ('column7', 3),
+    ('column8', 0)
+])
+def test_hash_based_comparison(engine, col, mismatch_count):
+    hash_comparison_results = engine.hash_based_comparison(['non_key_col1', 'non_key_col2'])
+    assert any(col == c for c, count in hash_comparison_results) and count == mismatch_count
+mermaid.md
+mermaid
+graph TD;
+    A[Local Storage] --> B[Spark Processing];
+    B --> C[Report Generation];
+graph TD;
+    A[Local Storage] --> B[Spark Processing];
+    B --> C[Report Generation];
+runbook.md
+Environment Setup:
+1. Install Python: pip install python3
+2. Install required packages: pip install -r requirements.txt
+
+Execution Steps:
+1. Navigate to the directory containing main.py.
+2. Run: python main.py
+Environment Setup:
+1. Install Python: pip install python3
+2. Install required packages: pip install -r requirements.txt
+
+Execution Steps:
+1. Navigate to the directory containing main.py.
+2. Run: python main.py

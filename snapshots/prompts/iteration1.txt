@@ -1,0 +1,164 @@
+You are a Senior Data Engineer and Python Architect.
+
+Generate a complete end-to-end reconciliation project for the following requirement:
+
+Requirement:
+A table has been migrated from Source (System A) to Target (System B) in Databricks.
+We need to:
+
+Perform full data reconciliation between Source and Target tables
+
+Generate a reconciliation report as an output file (CSV + Excel)
+
+Provide visualization capabilities in Python
+
+Provide a complete architectural diagram
+
+Follow production-grade best practices
+
+Code should be modular and reusable
+
+Assumptions:
+
+Both tables exist in Databricks (Delta tables)
+
+Access via PySpark
+
+Tables may contain millions of records
+
+Comparison should include:
+
+Row count validation
+
+Column-level null check comparison
+
+Aggregate comparison (sum, min, max, avg for numeric columns)
+
+Primary key-based row-level mismatch detection
+
+Hash-based full row comparison
+
+Output should include summary and detailed mismatch records
+
+Deliverables:
+
+SECTION 1: Architecture
+
+Explain high-level architecture
+
+Provide Mermaid diagram
+
+Include components:
+
+Databricks
+
+Source Table
+
+Target Table
+
+Reconciliation Engine (PySpark)
+
+Reporting Layer
+
+Visualization Layer
+
+SECTION 2: Project Structure
+Provide folder structure like a real project:
+
+src/
+
+config/
+
+utils/
+
+reports/
+
+main.py
+
+SECTION 3: PySpark Reconciliation Code
+Provide:
+
+Config-driven table comparison
+
+Functions:
+
+get_row_count()
+
+compare_schema()
+
+compare_aggregates()
+
+compare_nulls()
+
+hash_comparison()
+
+primary_key_mismatch()
+
+Efficient handling for large datasets
+
+Use broadcast joins if needed
+
+Handle data skew considerations
+
+SECTION 4: Reporting
+
+Generate:
+
+CSV summary report
+
+Detailed mismatch report
+
+Excel output with multiple sheets
+
+Use pandas only after aggregating results
+
+Save to local or DBFS path
+
+SECTION 5: Visualization
+Provide Python code using:
+
+Matplotlib or Plotly
+
+Bar chart for row count difference
+
+Column-level mismatch visualization
+
+Null distribution comparison
+
+Aggregate comparison charts
+
+SECTION 6: Sample Output Format
+Show example of:
+
+Summary report table
+
+Detailed mismatch table
+
+SECTION 7: Performance Optimization
+Explain:
+
+Partitioning strategy
+
+Z-order optimization
+
+Caching
+
+Adaptive query execution
+
+SECTION 8: How to Run
+Provide execution steps for Databricks notebook and CLI-based execution.
+
+Constraints:
+
+Write clean, production-grade code
+
+Use logging
+
+Add error handling
+
+Add comments
+
+Avoid unnecessary explanation
+
+Focus on implementation
+Output everything in a structured format.
